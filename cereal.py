@@ -81,6 +81,15 @@ class Cereal:
             if type(v) is not t:
                 assert isinstance(v, dict), "Nested cereal entity was overwritten with a non-dictionary."
                 self.__dict__[k] = t(**v)
+    
+    def check_nested_arguments(self):
+        """
+        An overrideable method that can check nested arguments after deserialization. This is useful for
+         checking that nested arguments are valid. This gets called after auto_deserialize_hinted_nested.
+        This is necessary because when deserializing, the nested Cereal entities are still in dict form, and are
+         until after the auto_deserialize_hinted_nested decorator fires.
+        """
+        assert True
 
     @staticmethod
     def auto_deserialize_hinted_nested(__init__):
@@ -150,6 +159,8 @@ class Cereal:
                         # If a string and typed as an enum, convert.
                         if inspect.isclass(hints[k]) and issub(hints[k], Enum):
                             self.__dict__[k] = hints[k][v]
+
+            self.check_nested_arguments()
 
         return wrap
 
