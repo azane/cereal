@@ -104,12 +104,25 @@ class Cereal:
 
                 if k in hints:
 
-                    # Unwrap Optionals.
+                    # Unwrap Unions.
                     if hasattr(hints[k], "__origin__") and hints[k].__origin__ is Union:
                         a = hints[k].__args__
+
+                        # Handle optionals.
                         if len(a) == 2 and a[0] is not type(None) and a[1] is type(None):
                             hints[k] = a[0]
 
+                        # Handle unions over cereal types.
+                        elif isinstance(v, dict):
+                            # Get the cereal type from the _cereal_meta of this value.
+                            cereal_type = v.get(Cereal.CEREAL_META, {}).get(Cereal._CEREAL_TYPE)
+                            if cereal_type is not None:
+                                # Find the cereal type in the union.
+                                for t in a:
+                                    if issub(t, Cereal) and t.__name__ == cereal_type:
+                                        hints[k] = t
+                                        break
+                                    
                     # If the underlying json is a dict and the input was typed.
                     if isinstance(v, dict):
                         # If it was typed as a Cereal class directly.
