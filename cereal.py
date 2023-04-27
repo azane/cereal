@@ -259,6 +259,14 @@ class Cereal:
             return {k: v for k, v in self.__dict__.items() if v is not None}
         else:
             return self.__dict__
+    
+    def __eq__(self, other):
+        if not issubclass(other, Cereal):
+            raise NotImplementedError("Equality between a Cereal class and a non-Cereal class is not supported.")
+        # Again, not the fastest but :shrug:
+        this_str = json.dumps(self, cls=CerealEncoder, sort_keys=True)
+        other_str = json.dumps(other, cls=CerealEncoder, sort_keys=True)
+        return this_str == other_str
 
 
 if __name__ == "__main__":
