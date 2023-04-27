@@ -113,6 +113,19 @@ class Cereal:
 
                 if k in hints:
 
+                    # Unwrap constrained type vars and instantiate the fulfilling class.
+                    if isinstance(hints[k], TypeVar) and len(hints[k].__constraints__) and isinstance(v, dict):
+                        a = hints[k].__constraints__
+                        # TODO this is duplicate code w/ below. Abstract out.
+                        # Get the cereal type from the _cereal_meta of this value, and instantiate
+                        #  the class if it matches a type constraint.
+                        cereal_type = v.get(Cereal.CEREAL_META, {}).get(Cereal._CEREAL_TYPE)
+                        if cereal_type is not None:
+                            for t in a:
+                                if issub(t, Cereal) and t.__name__ == cereal_type:
+                                    hints[k] = t
+                                    break
+
                     # Unwrap Unions.
                     if hasattr(hints[k], "__origin__") and hints[k].__origin__ is Union:
                         a = hints[k].__args__
