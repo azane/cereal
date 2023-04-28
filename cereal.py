@@ -261,7 +261,7 @@ class Cereal:
             return self.__dict__
     
     def __eq__(self, other):
-        if not issubclass(other, Cereal):
+        if not issubclass(type(other), Cereal):
             raise NotImplementedError("Equality between a Cereal class and a non-Cereal class is not supported.")
         # Again, not the fastest but :shrug:
         this_str = json.dumps(self, cls=CerealEncoder, sort_keys=True)
