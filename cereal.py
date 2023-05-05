@@ -1,8 +1,9 @@
-import json
 from typing import *
 import inspect
 from enum import Enum
 from contextlib import contextmanager
+import json
+import numpy as np
 
 
 class CerealEncoder(json.JSONEncoder):
@@ -12,6 +13,10 @@ class CerealEncoder(json.JSONEncoder):
             return obj.to_json()
         elif isinstance(obj, Enum):
             return obj.name
+        # TODO does numpy have a predefined collection of all these stringable
+        #  types?
+        elif type(obj) in [np.int64, np.int32, np.float32, np.float64]:
+            return str(obj)
         else:
             return json.JSONEncoder.default(self, obj)
 
