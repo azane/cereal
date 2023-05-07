@@ -6,6 +6,10 @@ import json
 import numpy as np
 
 
+class CerealError(TypeError):
+    pass
+
+
 class CerealEncoder(json.JSONEncoder):
     # noinspection PyProtectedMember
     def default(self, obj):
@@ -13,6 +17,8 @@ class CerealEncoder(json.JSONEncoder):
             return obj.to_json()
         elif isinstance(obj, Enum):
             return obj.name
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
         # TODO does numpy have a predefined collection of all these stringable
         #  types?
         elif type(obj) in [np.int64, np.int32, np.float32, np.float64]:
@@ -95,7 +101,81 @@ class Cereal:
          until after the auto_deserialize_hinted_nested decorator fires.
         """
         assert True
+    
+    @staticmethod
+    def try_deserialize_cereal_type(v: Dict, *unwrapped_hints: Type['Cereal']) -> Union['Cereal', Dict]:
+        cereal_type = v.get(Cereal.CEREAL_META, {}).get(Cereal._CEREAL_TYPE)
+        if cereal_type is not None:
+            for t in unwrapped_hints:
+                if inspect.isclass(t) and issubclass(t, Cereal) and t.__name__ == cereal_type:
+                    return t(**v)
+            raise CerealError(f"Cereal type {cereal_type} was defined in json, but type hint(s) "
+                              f"did not match that type.")
+        else:
+            # If this isn't a cereal type just return the raw dictionary.
+            # TODO r20njldf support cases where a cereal entity is inside a dict (as key or val).
+            #  Without this, dict's are assumed to comprise only natively deserializeble types.
+            # Could do this by just doing a dictionary comprehension and recursing deeper...but
+            #  would need the generic key/val types from that dictionary...
+            return v
+    
+    @staticmethod
+    def recursive_auto_deserialize_hinted_nested(v, unwrapped_hint) -> object:
+        uw = unwrapped_hint
 
+        # Unwrap Unions.
+        if hasattr(uw, "__origin__") and uw.__origin__ is Union:
+            uwa = uw.__args__
+
+            # Unwrap optionals and recurse.
+            if len(uwa) == 2 and uwa[0] is not type(None) and uwa[1] is type(None):
+                return Cereal.recursive_auto_deserialize_hinted_nested(v, uwa[0])
+            
+            # Handle unions over cereal types.
+            if isinstance(v, dict):
+                return Cereal.try_deserialize_cereal_type(v, *uwa)
+            
+        # Unwrap lists.
+        elif isinstance(v, list):
+            # If this is supposed to be a list, recursevely handle each member.
+            if hasattr(uw, "__origin__") and uw.__origin__ is list:
+                uwa = uw.__args__
+                if len(uwa) != 1:
+                    raise CerealError("Type hinting lists without a single inner type is not allowed.")
+                return [Cereal.recursive_auto_deserialize_hinted_nested(i, uwa[0]) for i in v]
+            # If it's supposed to be a numpy array, just return that.
+            elif inspect.isclass(uw) and issubclass(uw, np.ndarray):
+                return np.array(v)
+            
+        # TODO unwrap tuples
+
+        # TODO unwrap dicts r20njldf
+        
+        # Handle enum types defined as strings.
+        elif isinstance(v, str) and inspect.isclass(uw) and issubclass(uw, Enum):
+            return uw[v]
+
+        # If, at any point, we get a dict, and we've made it past all the unwraps above,
+        #  assume it's a cereal type. If it isn't, we'll jsut get the raw dict back.
+        # TODO r20njldf support cases where a cereal entity is inside a dict (as key or val).
+        #  Without this, dict's are assumed to comprise only natively deserializeble types.
+        elif isinstance(v, dict):
+            # Unwrap constrained type vars (cereal constrained generics).
+            if isinstance(uw, TypeVar) and len(uw.__constraints__):
+                return Cereal.try_deserialize_cereal_type(v, *uw.__constraints__)
+            # Decouple generic cereal types from their generics.
+            # It's fine to ignore the generic types here, because if those generic
+            #  types will be defined simply in virtue of them being present as object
+            #  attributes.
+            elif hasattr(uw, "__origin__") and issubclass(uw.__origin__, Cereal):
+                return Cereal.try_deserialize_cereal_type(v, uw.__origin__)
+            else:
+                return Cereal.try_deserialize_cereal_type(v, uw)
+        
+        # If, after all that, we get here, it's probably just a primitive type that doesn't need
+        #  to be objectified further.
+        return v
+    
     @staticmethod
     def auto_deserialize_hinted_nested(__init__):
         """
@@ -103,6 +183,7 @@ class Cereal:
         of Cereal child classes and type hint arguments with either CerealChild, List[CerealChild], or
         Optional[CerealChild], where the last should take a default of None.
         """
+
         def wrap(self, *args, **kwargs):
             # Get the initializer type hints.
             hints = get_type_hints(__init__)
@@ -111,73 +192,12 @@ class Cereal:
 
             # TODO provide support for general type-hinted generics with inner Cereal types. E.g. Dict[str, Cereal]
             # TODO there's probably an elegant way to this.
-
-            issub = issubclass
+            
             # Run through all of the attributes and send kwargs to constructors where necessary.
             for k, v in self.__dict__.items():
-
                 if k in hints:
-
-                    # Unwrap constrained type vars and instantiate the fulfilling class.
-                    if isinstance(hints[k], TypeVar) and len(hints[k].__constraints__) and isinstance(v, dict):
-                        a = hints[k].__constraints__
-                        # TODO this is duplicate code w/ below. Abstract out.
-                        # Get the cereal type from the _cereal_meta of this value, and instantiate
-                        #  the class if it matches a type constraint.
-                        cereal_type = v.get(Cereal.CEREAL_META, {}).get(Cereal._CEREAL_TYPE)
-                        if cereal_type is not None:
-                            for t in a:
-                                if issub(t, Cereal) and t.__name__ == cereal_type:
-                                    hints[k] = t
-                                    break
-
-                    # Unwrap Unions.
-                    if hasattr(hints[k], "__origin__") and hints[k].__origin__ is Union:
-                        a = hints[k].__args__
-
-                        # Handle optionals.
-                        if len(a) == 2 and a[0] is not type(None) and a[1] is type(None):
-                            hints[k] = a[0]
-
-                        # Handle unions over cereal types.
-                        elif isinstance(v, dict):
-                            # Get the cereal type from the _cereal_meta of this value.
-                            cereal_type = v.get(Cereal.CEREAL_META, {}).get(Cereal._CEREAL_TYPE)
-                            if cereal_type is not None:
-                                # Find the cereal type in the union.
-                                for t in a:
-                                    if issub(t, Cereal) and t.__name__ == cereal_type:
-                                        hints[k] = t
-                                        break
-                                    
-                    # If the underlying json is a dict and the input was typed.
-                    if isinstance(v, dict):
-                        # If it was typed as a Cereal class directly.
-                        if inspect.isclass(hints[k]) and issub(hints[k], Cereal):
-                            self.__dict__[k] = hints[k](**v)
-                        # # If it was typed as Optional[Cereal] or Union[Cereal, None]
-                        # elif hints[k].__origin__ is Union and issub(hints[k].__args__[0], Cereal):
-                        #     self.__dict__[k] = hints[k].__args__[0](**v)
-
-                    # If it was typed as List[Cereal] and underlying json is a list of kwargs for Cereal entities.
-                    elif isinstance(v, list) and hints[k].__origin__ is list and \
-                            inspect.isclass(hints[k].__args__[0]) and issub(hints[k].__args__[0], Cereal):
-                        if len(self.__dict__[k]):
-                            if isinstance(self.__dict__[k][0], dict):
-                                collection = []
-                                for d in v:
-                                    assert isinstance(d, dict), \
-                                        "Unexpected mixture of kwargs and non-kwargs in raw json."
-                                    collection.append(hints[k].__args__[0](**d))
-                                self.__dict__[k] = collection
-                        else:
-                            self.__dict__[k] = []
-
-                    elif isinstance(v, str):
-                        # If a string and typed as an enum, convert.
-                        if inspect.isclass(hints[k]) and issub(hints[k], Enum):
-                            self.__dict__[k] = hints[k][v]
-
+                    self.__dict__[k] = Cereal.recursive_auto_deserialize_hinted_nested(v, hints[k])
+            
             self.check_nested_arguments()
 
         return wrap
