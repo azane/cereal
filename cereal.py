@@ -21,8 +21,10 @@ class CerealEncoder(json.JSONEncoder):
             return obj.tolist()
         # TODO does numpy have a predefined collection of all these stringable
         #  types?
-        elif type(obj) in [np.int64, np.int32, np.float32, np.float64]:
-            return str(obj)
+        elif type(obj) in [np.int64, np.int32]:
+            return int(obj)
+        elif type(obj) in [np.float64, np.float32]:
+            return float(obj)
         else:
             return json.JSONEncoder.default(self, obj)
 
@@ -193,7 +195,7 @@ class Cereal:
             # TODO provide support for general type-hinted generics with inner Cereal types. E.g. Dict[str, Cereal]
             # TODO there's probably an elegant way to this.
             
-            # Run through all of the attributes and send kwargs to constructors where necessary.
+            # Run through all the attributes and send kwargs to constructors where necessary.
             for k, v in self.__dict__.items():
                 if k in hints:
                     self.__dict__[k] = Cereal.recursive_auto_deserialize_hinted_nested(v, hints[k])
