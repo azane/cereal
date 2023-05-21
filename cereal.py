@@ -14,6 +14,8 @@ class CerealEncoder(json.JSONEncoder):
     # noinspection PyProtectedMember
     def default(self, obj):
         if isinstance(obj, Cereal):
+            if obj.not_serializeable:
+                raise CerealError(f"Cereal inheritors of type {obj.__class__.__name__} are not serializeable.")
             return obj.to_json()
         elif isinstance(obj, Enum):
             return obj.name
@@ -203,6 +205,14 @@ class Cereal:
             self.check_nested_arguments()
 
         return wrap
+
+    @property
+    def not_serializeable(self) -> bool:
+        """
+        Overrideable by inheritors if they want to reject (de)serialization support.
+        Useful for edge-case child classes that involve non-serializeable components.
+        """
+        return False
 
     def __init__(self, **kwargs):
         super().__init__()
